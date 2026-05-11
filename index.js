@@ -93,10 +93,8 @@ function invoiceKeyboard(finalOrderId) {
             )
         ],
         [
-            Markup.button.callback(
-                "❌ Cancel",
-                `cancels_${finalOrderId}`
-            )
+            Markup.button.url("🧾 View Invoice", `${process.env.PAYMENT_URL}/invoice/${finalOrderId}`),
+            Markup.button.callback("❌ Cancel", `cancels_${finalOrderId}`)
         ]
     ]);
 }
@@ -645,8 +643,7 @@ bot.action(/^check_(.+)$/, async ctx => {
         payment.check_response = api_check;
         saveDB(db);
 
-        if (
-            PAID_STATUS.includes(api_check.data.transaction_status) ||
+        if (PAID_STATUS.includes(api_check.data.transaction_status) ||
             FAILED_STATUS.includes(api_check.data.transaction_status)
         ) {
             return await finishPayment(
@@ -674,10 +671,16 @@ bot.action(/^check_(.+)$/, async ctx => {
     }
 });
 
-app.post("/payment/callback", async (req, res) => {
+app.post("/webhook/gopay", async (req, res) => {
+    console.log(
+        "Webhook callback:",
+        JSON.stringify(req.body, null, 2)
+    );
+
     try {
         const signature = req.headers["x-signature"];
         const payload = JSON.stringify(req.body);
+
         const expectedSignature = crypto
             .createHmac("sha256", process.env.PAYMENT_API_KEY)
             .update(payload)
@@ -706,6 +709,7 @@ app.post("/payment/callback", async (req, res) => {
 
         const orderId = transaction.order_id;
         const status = transaction.status;
+
         const db = loadDB();
 
         const payment = db.payments.find(
@@ -722,19 +726,31 @@ app.post("/payment/callback", async (req, res) => {
 
         payment.status = status;
         payment.updated_at = formatDate();
+
         saveDB(db);
 
-        if (PAID_STATUS.includes(status) || FAILED_STATUS.includes(status)) {
-            await finishPayment(
-                bot.telegram,
-                payment,
-                status
-            );
+        if (
+            PAID_STATUS.includes(status) ||
+            FAILED_STATUS.includes(status)
+        ) {
+            try {
+                await finishPayment(
+                    bot.telegram,
+                    payment,
+                    status
+                );
+            } catch (finishErr) {
+                console.log(
+                    "Finish payment error:",
+                    finishErr.message
+                );
+            }
         }
 
         return res.json({
             success: true
         });
+
     } catch (err) {
         console.log("Webhook error:", err.message);
 
@@ -775,6 +791,444 @@ function cleanupOldPayments() {
     );
 }
 
+app.get("/invoice/:orderId", (req, res) => {
+    const { orderId } = req.params;
+
+    const db = loadDB();
+    const payment = db.payments.find(
+        p => p.transaction_id === orderId || p.order_id === orderId
+    );
+
+    if (!payment) {
+        return res.status(404).send("Payment not found");
+    }
+
+    res.send(`
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Invoice - ${cleanOrderId(payment.transaction_id)}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+</head>
+
+<body class="overflow-x-auto bg-slate-100">
+  <div class="min-h-screen flex items-center justify-center px-4 py-10">
+    <div class="w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden">
+
+      <div class="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-6 text-white text-center">
+        <h1 class="text-2xl font-bold">Invoice</h1>
+        <p class="text-sm text-blue-100 mt-1">#${cleanOrderId(payment.order_id)}</p>
+      </div>
+
+      <div class="p-6">
+
+        <div id="info-container" class="bg-slate-50 rounded-2xl p-4 mb-6 border border-slate-200">
+          <div class="flex justify-between gap-4 mb-3">
+            <span class="text-sm text-slate-500">Transaction ID</span>
+            <span class="text-sm font-semibold text-slate-800 text-right break-all">${cleanOrderId(payment.order_id)}</span>
+          </div>
+
+          <div class="flex justify-between gap-4 mb-3">
+            <span class="text-sm text-slate-500">Amount</span>
+            <span class="text-xl font-bold text-blue-600">
+              Rp ${Number(payment.amount).toLocaleString("id-ID")}
+            </span>
+          </div>
+
+          <div class="flex justify-between gap-4">
+            <span class="text-sm text-slate-500">Transaction Time</span>
+            <span class="text-xs font-semibold text-slate-700 text-right break-all">${payment.transaction_time}</span>
+          </div>
+        </div>
+
+        <div id="qrcode-container" class="flex justify-center mb-6">
+          <div id="qrcode" class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm"></div>
+        </div>
+
+        <div id="result-message" class="hidden mb-6"></div>
+
+        <div id="timer-box" class="bg-amber-50 border border-amber-200 rounded-2xl p-4 mb-5">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium text-slate-700">Expired in</span>
+            <span id="timer" class="text-xl font-bold text-amber-600">--:--</span>
+          </div>
+
+          <div class="mt-3">
+            <div class="w-full bg-slate-200 rounded-full h-2">
+              <div id="progress" class="bg-amber-500 h-2 rounded-full transition-all duration-1000" style="width: 100%"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="text-center mb-6">
+          <div id="status" class="inline-flex items-center px-4 py-2 rounded-full bg-amber-100 text-amber-800 text-sm font-semibold">
+            Waiting for payment
+          </div>
+        </div>
+
+        <div id="button-area" class="grid grid-cols-1 gap-3">
+          <button id="download-qris-btn" onclick="downloadQR()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-semibold py-3 px-4 rounded-xl transition">
+            Download QRIS
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const qrisData = ${JSON.stringify(payment.qr_string)};
+    const orderId = ${JSON.stringify(payment.order_id)};
+    const cleareOrder = '${cleanOrderId(payment.order_id)}';
+    const expiredAt = ${JSON.stringify(
+        new Date(payment.expiry_time).toLocaleString("sv-SE", {
+            timeZone: "Asia/Jakarta",
+        }),
+    )};
+    const amount = ${JSON.stringify(Number(payment.amount))};
+    const transactionId = ${JSON.stringify(payment.transaction_id)};
+    let paymentStatus = ${JSON.stringify(payment.status || "pending")};
+    const expiryTime = new Date(expiredAt.replace(" ", "T") + "+07:00").getTime();
+    const startTime = new Date(new Date().toLocaleString("sv-SE", {
+        timeZone: "Asia/Jakarta"
+      }).replace(" ", "T") + "+07:00").getTime();
+
+    const totalDuration = expiryTime - startTime;
+
+    function isPaid(status) {
+      return ["paid", "success", "settlement"].includes(String(status).toLowerCase());
+    }
+
+    function isFailed(status) {
+      return ["expired", "expire", "cancel", "failed"].includes(String(status).toLowerCase());
+    }
+
+
+    const paymentInterval = setInterval(() => {
+    if (isPaid(paymentStatus) || isFailed(paymentStatus)) {
+        clearInterval(paymentInterval);
+        return;
+    }
+    if (Date.now() >= expiryTime) {
+        clearInterval(paymentInterval);
+        return;
+    }
+    checkPaymentStatus(false);
+    }, 3000);
+
+    function hidePaymentArea() {
+      document.getElementById("info-container").style.display = "none";
+      document.getElementById("qrcode-container").style.display = "none";
+      document.getElementById("timer-box").style.display = "none";
+      document.getElementById("download-qris-btn").style.display = "none";
+    }
+
+    function setSuccessPage() {
+      clearInterval(paymentInterval);
+      hidePaymentArea();
+
+      document.getElementById("status").className =
+        "inline-flex items-center px-4 py-2 rounded-full bg-green-100 text-green-700 text-sm font-semibold";
+      document.getElementById("status").innerHTML = "Payment Successful";
+
+      document.getElementById("result-message").className =
+        "bg-green-50 border border-green-200 rounded-3xl p-6 mb-6 text-center";
+
+      document.getElementById("result-message").innerHTML = \`
+            <div class="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-green-100">
+                <svg class="h-11 w-11 text-green-600" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"></path>
+                </svg>
+            </div>
+
+            <h3 class="text-2xl font-bold text-green-700 mb-2">
+                Payment Successful
+            </h3>
+
+            <p class="text-sm text-green-700 mb-5">
+                Your payment has been received and confirmed.
+            </p>
+
+            <div class="bg-white rounded-2xl p-4 text-left border border-green-200 space-y-3">
+                <div class="flex justify-between gap-4">
+                    <span class="text-sm text-slate-500">Amount</span>
+                    <span class="text-sm font-bold text-green-600">
+                        Rp \${Number(amount).toLocaleString("id-ID")}
+                    </span>
+                </div>
+
+                <div class="flex justify-between gap-4">
+                    <span class="text-sm text-slate-500">Transaction</span>
+                    <span class="text-xs font-semibold text-slate-700 text-right break-all">
+                        \${cleareOrder}
+                    </span>
+                </div>
+
+                <div class="flex justify-between gap-4">
+                    <span class="text-sm text-slate-500">Status</span>
+                    <span class="text-sm font-bold text-green-600">PAID</span>
+                </div>
+            </div>
+        \`;
+    }
+
+    function setFailedPage(statusText = "Expired") {
+        clearInterval(paymentInterval);
+        hidePaymentArea();
+
+        const cleanStatus = String(statusText).toUpperCase();
+
+        document.getElementById("status").className =
+            "inline-flex items-center px-4 py-2 rounded-full bg-red-100 text-red-700 text-sm font-semibold";
+        document.getElementById("status").innerHTML = "Payment " + cleanStatus;
+
+        document.getElementById("result-message").className =
+            "bg-red-50 border border-red-200 rounded-3xl p-6 mb-6 text-center";
+
+        document.getElementById("result-message").innerHTML = \`
+            <div class="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full bg-red-100">
+                <svg class="h-11 w-11 text-red-600" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
+                </svg>
+            </div>
+
+            <h3 class="text-2xl font-bold text-red-700 mb-2">
+                Payment \${cleanStatus}
+            </h3>
+
+            <p class="text-sm text-red-700 mb-5">
+                This payment is no longer valid.
+            </p>
+
+            <div class="bg-white rounded-2xl p-4 text-left border border-red-200 space-y-3">
+                <div class="flex justify-between gap-4">
+                    <span class="text-sm text-slate-500">Amount</span>
+                    <span class="text-sm font-bold text-red-600">
+                        Rp \${Number(amount).toLocaleString("id-ID")}
+                    </span>
+                </div>
+
+                <div class="flex justify-between gap-4">
+                    <span class="text-sm text-slate-500">Transaction</span>
+                    <span class="text-xs font-semibold text-slate-700 text-right break-all">
+                        \${cleareOrder}
+                    </span>
+                </div>
+
+                <div class="flex justify-between gap-4">
+                    <span class="text-sm text-slate-500">Status</span>
+                    <span class="text-sm font-bold text-red-600">
+                        \${cleanStatus}
+                    </span>
+                </div>
+            </div>
+        \`;
+    }
+
+    function generateQR() {
+        if (isPaid(paymentStatus)) {
+            setSuccessPage();
+            return;
+        }
+
+        if (isFailed(paymentStatus)) {
+            setFailedPage(paymentStatus);
+            return;
+        }
+
+        if (Date.now() >= expiryTime) {
+            setFailedPage("EXPIRED");
+            return;
+        }
+
+        new QRCode(document.getElementById("qrcode"), {
+            text: qrisData,
+            width: 256,
+            height: 256,
+            colorDark: "#000000",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.H
+        });
+    }
+
+    function updateTimer() {
+        if (isPaid(paymentStatus) || isFailed(paymentStatus)) return;
+
+        const now = Date.now();
+        const distance = expiryTime - now;
+
+        if (distance <= 0) {
+            document.getElementById("timer").innerHTML = "EXPIRED";
+            document.getElementById("progress").style.width = "0%";
+            setFailedPage("EXPIRED");
+            return;
+        }
+
+        const minutes = Math.floor(distance / 1000 / 60);
+        const seconds = Math.floor((distance / 1000) % 60);
+
+        document.getElementById("timer").innerHTML =
+            String(minutes).padStart(2, "0") + ":" + String(seconds).padStart(2, "0");
+
+        const progress = Math.max(0, Math.min(100, (distance / totalDuration) * 100));
+        document.getElementById("progress").style.width = progress + "%";
+
+        setTimeout(updateTimer, 1000);
+    }
+
+    function downloadQR() {
+        const qrCanvas = document.querySelector("#qrcode canvas");
+
+        if (!qrCanvas) {
+            return alert("QR Code not available");
+        }
+
+        const link = document.createElement("a");
+        link.download = "QRIS-" + orderId + ".png";
+        link.href = qrCanvas.toDataURL("image/png");
+        link.click();
+    }
+
+    async function checkPaymentStatus(showAlert = false) {
+        try {
+            const response = await fetch("/api/payment/status/" + transactionId);
+            const data = await response.json();
+
+            if (!data.success) {
+                if (showAlert) alert(data.message || "Failed to check payment status");
+                return;
+            }
+
+            const paymentStatus = data.data.status;
+
+            if (isPaid(paymentStatus)) {
+                setSuccessPage();
+                return;
+            }
+
+            if (isFailed(paymentStatus)) {
+                setFailedPage(paymentStatus);
+                return;
+            }
+
+            if (showAlert) {
+                alert("Payment status: " + paymentStatus);
+            }
+
+        } catch (err) {
+            console.error(err);
+
+            if (showAlert) {
+                alert("Failed to check payment status");
+            }
+        }
+    }
+
+    generateQR();
+    updateTimer();
+    checkPaymentStatus(false);
+  </script>
+</body>
+
+</html>
+`);
+});
+
+app.get("/api/payment/status/:orderId", async (req, res) => {
+    const { orderId } = req.params;
+
+    const db = loadDB();
+    const payment = db.payments.find(p => p.transaction_id === orderId);
+
+    if (!payment) {
+        return res.json({
+            success: false,
+            message: "Payment not found"
+        });
+    }
+
+    if (payment.status != 'pending') {
+        return res.json({
+            success: true,
+            data: {
+                order_id: payment.order_id,
+                transaction_id: payment.transaction_id,
+                status: payment.status
+            }
+        });
+    }
+
+
+    const expiredAts = new Date(
+        payment.expiry_time.replace(" ", "T") + "+07:00"
+    ).getTime();
+
+    if (payment.expiry_time && Date.now() >= expiredAts) {
+        payment.status = "expire";
+        payment.updated_at = formatDate();
+        saveDB(db);
+
+        return res.json({
+            success: true,
+            data: {
+                order_id: payment.order_id,
+                transaction_id: payment.transaction_id,
+                status: payment.status
+            }
+        });
+    }
+
+    const check_status = await api.post("/qris/status", {
+        transaction_id: payment.transaction_id
+    });
+
+    const api_check = check_status.data;
+
+    if (!api_check.success) {
+        return res.json({
+            success: true,
+            data: {
+                order_id: payment.order_id,
+                transaction_id: payment.transaction_id,
+                status: payment.status
+            }
+        });
+    }
+
+    payment.status = api_check.data.transaction_status;
+    payment.updated_at = formatDate();
+    payment.check_response = api_check;
+    saveDB(db);
+
+    return res.json({
+        success: true,
+        data: {
+            order_id: payment.order_id,
+            transaction_id: payment.transaction_id,
+            status: api_check.data.transaction_status
+        }
+    });
+});
+
+// 404 handler
+app.use((req, res) => {
+    res.status(404).send(`
+    <h1>Page Not Found</h1>
+  `)
+})
+
+// Global error handler
+app.use((err, req, res, next) => {
+    console.error(err)
+
+    res.status(err.status || 500).send(`
+    <h1>Internal Server Error</h1>
+  `)
+})
 
 setInterval(() => {
     cleanupOldPayments();
