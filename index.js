@@ -35,6 +35,29 @@ function formatDate(date = new Date()) {
     }).format(date);
 }
 
+const OWNER_ID = ["7633035445"];
+
+function isOwner(ctx) {
+    return OWNER_ID.includes(String(ctx.from.id));
+}
+
+function loadBanks() {
+    const db = loadDB();
+
+    if (!db.banks) {
+        db.banks = [];
+        saveDB(db);
+    }
+
+    return db.banks;
+}
+
+function saveBanks(banks) {
+    const db = loadDB();
+    db.banks = banks;
+    saveDB(db);
+}
+
 function esc(text) {
     return String(text ?? "")
         .replace(/&/g, "&amp;")
@@ -76,10 +99,16 @@ function paymentCaption(paymentData, finalOrderId, expiredAt) {
 function confirmKeyboard(amount) {
     return Markup.inlineKeyboard([
         [
-            Markup.button.callback("✅ Yes", `confirm_${amount}`),
-        ],
-        [
-            Markup.button.callback("🔙 Back", "confirm_cancel"),
+            {
+                text: "✅ Yes",
+                callback_data: `confirm_${amount}`,
+                style: "success"
+            },
+            {
+                text: "🔙 Back",
+                callback_data: "confirm_cancel",
+                style: "danger"
+            }
         ]
     ]);
 }
@@ -87,14 +116,23 @@ function confirmKeyboard(amount) {
 function invoiceKeyboard(finalOrderId) {
     return Markup.inlineKeyboard([
         [
-            Markup.button.callback(
-                "🔄 Check Status",
-                `check_${finalOrderId}`
-            )
+            {
+                text: "🔄 Check Status",
+                callback_data: `check_${finalOrderId}`,
+                style: "primary"
+            }
         ],
         [
-            Markup.button.url("🧾 View Invoice", `${process.env.PAYMENT_URL}/invoice/${finalOrderId}`),
-            Markup.button.callback("❌ Cancel", `cancels_${finalOrderId}`)
+            {
+                text: "🧾 View Invoice",
+                url: `${process.env.PAYMENT_URL}/invoice/${finalOrderId}`,
+                style: "primary"
+            },
+            {
+                text: "❌ Cancel",
+                callback_data: `cancels_${finalOrderId}`,
+                style: "danger"
+            }
         ]
     ]);
 }
@@ -221,6 +259,29 @@ function startCountdown(telegram, paymentData, finalOrderId, sentMessage, expire
             return;
         }
 
+        const check_status = await api.post("/qris/status", {
+            transaction_id: payment.transaction_id
+        });
+
+        const api_check = check_status.data;
+
+        if (!api_check.success && api_check.message != 'Transaction pending') {
+            stopCountdown(finalOrderId);
+            return;
+        }
+
+        if (PAID_STATUS.includes(api_check.data.transaction_status) || FAILED_STATUS.includes(api_check.data.transaction_status)) {
+            payment.status = api_check.data.transaction_status;
+            payment.updated_at = formatDate();
+            payment.check_response = api_check;
+            saveDB(db);
+            return await finishPayment(
+                telegram,
+                payment,
+                api_check.data.transaction_status
+            );
+        }
+
         try {
             await telegram.editMessageCaption(
                 sentMessage.chat.id,
@@ -267,7 +328,13 @@ const amountKeyboard = Markup.inlineKeyboard([
         Markup.button.callback("IDR 900.000", "amount_900000"),
         Markup.button.callback("IDR 1.000.000", "amount_1000000")
     ],
-    [Markup.button.callback("📝 Custom Amount", "custom_amount")]
+    [
+        {
+            text: "📝 Custom Amount",
+            callback_data: "custom_amount",
+            style: "primary"
+        }
+    ]
 ]);
 
 bot.start(ctx => {
@@ -298,7 +365,8 @@ bot.action("custom_amount", async ctx => {
 
     userState[ctx.from.id] = {
         waitingAmount: true,
-        threadId: getThreadId(ctx)
+        threadId: getThreadId(ctx),
+        botMsgId: ctx.callbackQuery.message.message_id
     };
 
     await ctx.editMessageText(
@@ -411,27 +479,156 @@ Your payment has been cancelled.`,
     });
 });
 
+bot.command("bank", async ctx => {
+    const banks = loadBanks();
+    if (!banks.length) {
+        return ctx.reply(
+            "❌ No bank available."
+        );
+    }
+
+    let text = `<b>BANK LIST</b>\n ━━━━━━━━━━━━━━━━━━`;
+    for (const bank of banks) {
+        if (bank.name == 'USDT') {
+            text += `
+<b>Wallet:</b> ${esc(bank.name)} - ${esc(bank.holder)}
+<b>Address:</b> <code>${esc(bank.number)}</code>
+`;
+        } else {
+            text += `
+<b>Bank Name:</b> ${esc(bank.name)}
+<b>Account Name:</b> ${esc(bank.holder)}
+<b>Account Number:</b> <code>${esc(bank.number)}</code>
+`;
+        }
+    }
+
+    text += `━━━━━━━━━━━━━━━━━━`
+
+    await ctx.reply(text, {
+        ...HTML,
+        ...threadOptionsFromCtx(ctx)
+    });
+});
+
+bot.command("addbank", async ctx => {
+
+    if (!isOwner(ctx)) {
+        return ctx.reply("❌ Owner only.");
+    }
+
+    const input = ctx.message.text.split(" ").slice(1).join(" ");
+
+    if (!input.includes("|")) {
+        return ctx.reply(
+            "Format:\n/addbank BCA|123456789|Name"
+        );
+    }
+
+    const [name, number, holder] = input.split("|");
+
+    if (!name || !number || !holder) {
+        return ctx.reply(
+            "Format:\n/addbank BCA|123456789|Name"
+        );
+    }
+
+    const banks = loadBanks();
+
+    banks.push({
+        name: name.trim(),
+        number: number.trim(),
+        holder: holder.trim()
+    });
+
+    saveBanks(banks);
+
+    await ctx.reply("✅ Bank added.");
+});
+
+bot.command("delbank", async ctx => {
+
+    if (!isOwner(ctx)) {
+        return ctx.reply("❌ Owner only.");
+    }
+
+    const bankName = ctx.message.text
+        .split(" ")
+        .slice(1)
+        .join(" ")
+        .trim()
+        .toUpperCase();
+
+    if (!bankName) {
+        return ctx.reply(
+            "Format:\n/delbank BCA"
+        );
+    }
+
+    const banks = loadBanks();
+
+    const filtered = banks.filter(
+        b => b.name.toUpperCase() !== bankName
+    );
+
+    saveBanks(filtered);
+
+    await ctx.reply("✅ Bank deleted.");
+});
+
 bot.on("text", async ctx => {
     const state = userState[ctx.from.id];
     if (!state?.waitingAmount) return;
 
     const currentThreadId = getThreadId(ctx);
+
     if (state.threadId !== currentThreadId) return;
 
-    const amount = Number(ctx.message.text.replace(/[^\d]/g, ""));
+    await ctx.deleteMessage().catch(() => { });
+
+    if (state.botMsgId) {
+        await ctx.telegram.deleteMessage(
+            ctx.chat.id,
+            state.botMsgId
+        ).catch(() => { });
+    }
+
+    const amount = Number(
+        ctx.message.text.replace(/[^\d]/g, "")
+    );
 
     if (!amount || amount < 1000) {
-        return ctx.reply(
-            `<b>⚠️ Invalid Amount</b>
-Minimum deposit amount is <b>IDR 1,000</b>.`,
-            {
-                ...HTML,
-                ...threadOptionsFromCtx(ctx)
-            }
+        const msg = await ctx.reply(
+            `⚠️ Invalid Amount\nMinimum deposit is IDR 1,000`
         );
+
+        setTimeout(async () => {
+            await ctx.telegram.deleteMessage(
+                ctx.chat.id,
+                msg.message_id
+            ).catch(() => { });
+        }, 5000);
+
+        return msg;
+    }
+
+    if (amount > 10000000) {
+        const msg = await ctx.reply(
+            `⚠️ Invalid Amount\nMaximum deposit is IDR 10,000,000`
+        );
+
+        setTimeout(async () => {
+            await ctx.telegram.deleteMessage(
+                ctx.chat.id,
+                msg.message_id
+            ).catch(() => { });
+        }, 5000);
+
+        return msg;
     }
 
     delete userState[ctx.from.id];
+
     await showConfirmAmount(ctx, amount);
 });
 
@@ -458,8 +655,13 @@ async function createPayment(ctx, amount) {
     const loadingMessage = await showLoading(ctx);
 
     try {
+        let finalAmount = Number(amount);
+        if (finalAmount >= 500000) {
+            finalAmount += Math.ceil(finalAmount * 0.005);
+        }
+
         const response = await api.post("/qris/generate", {
-            amount: Number(amount)
+            amount: finalAmount
         });
 
         const res = response.data;
@@ -505,6 +707,8 @@ async function createPayment(ctx, amount) {
             thread_id: getThreadId(ctx),
             username: ctx.from.username || null,
             amount: paymentData.amount,
+            original_amount: amount,
+            fee_amount: finalAmount - amount,
             status: paymentData.transaction_status,
             qr_string: paymentData.qr_string,
             qr_url: paymentData.qr_url,
@@ -525,7 +729,9 @@ async function createPayment(ctx, amount) {
         );
 
         return sentMessage;
+
     } catch (err) {
+
         console.log(err.response?.data || err.message);
 
         await ctx.telegram.editMessageText(
@@ -678,21 +884,6 @@ app.post("/webhook/gopay", async (req, res) => {
     );
 
     try {
-        const signature = req.headers["x-signature"];
-        const payload = JSON.stringify(req.body);
-
-        const expectedSignature = crypto
-            .createHmac("sha256", process.env.PAYMENT_API_KEY)
-            .update(payload)
-            .digest("hex");
-
-        if (signature !== expectedSignature) {
-            return res.status(401).json({
-                success: false,
-                error: "Invalid signature"
-            });
-        }
-
         const { event, transaction } = req.body;
 
         if (event === "verification.challenge") {
