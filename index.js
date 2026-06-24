@@ -20,981 +20,996 @@ const TIME_ZONE = "Asia/Jakarta";
 const EXPIRE_MINUTES = 5;
 
 const HTML = {
-    parse_mode: "HTML"
+  parse_mode: "HTML",
 };
 
 function rupiah(amount) {
-    return Number(amount).toLocaleString("id-ID");
+  return Number(amount).toLocaleString("id-ID");
 }
 
 function formatDate(date = new Date()) {
-    return new Intl.DateTimeFormat("en-GB", {
-        timeZone: TIME_ZONE,
-        dateStyle: "medium",
-        timeStyle: "medium"
-    }).format(date);
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: TIME_ZONE,
+    dateStyle: "medium",
+    timeStyle: "medium",
+  }).format(date);
 }
 
 const OWNER_ID = ["7633035445"];
 
 function isOwner(ctx) {
-    return OWNER_ID.includes(String(ctx.from.id));
+  return OWNER_ID.includes(String(ctx.from.id));
 }
 
 function loadBanks() {
-    const db = loadDB();
+  const db = loadDB();
 
-    if (!db.banks) {
-        db.banks = [];
-        saveDB(db);
-    }
+  if (!db.banks) {
+    db.banks = [];
+    saveDB(db);
+  }
 
-    return db.banks;
+  return db.banks;
 }
 
 function saveBanks(banks) {
-    const db = loadDB();
-    db.banks = banks;
-    saveDB(db);
+  const db = loadDB();
+  db.banks = banks;
+  saveDB(db);
 }
 
 function esc(text) {
-    return String(text ?? "")
-        .replace(/&/g, "&amp;")
-        .replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;");
+  return String(text ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
 function cleanOrderId(orderId) {
-    return String(orderId || "")
-        .replace(/-/g, "")
-        .replace(/AUTOGOPAY/g, "");
+  return String(orderId || "")
+    .replace(/-/g, "")
+    .replace(/AUTOGOPAY/g, "");
 }
 
 function getCountdown(expiryTime) {
-    const expiredAt = new Date(
-        expiryTime.replace(" ", "T") + "+07:00"
-    ).getTime();
-    const diff = expiredAt - Date.now();
-    if (diff <= 0) {
-        return "00:00";
-    }
-    const minutes = Math.floor(diff / 1000 / 60);
-    const seconds = Math.floor((diff / 1000) % 60);
-    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  const expiredAt = new Date(expiryTime.replace(" ", "T") + "+07:00").getTime();
+  const diff = expiredAt - Date.now();
+  if (diff <= 0) {
+    return "00:00";
+  }
+  const minutes = Math.floor(diff / 1000 / 60);
+  const seconds = Math.floor((diff / 1000) % 60);
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 
 function threadOptionsFromCtx(ctx) {
-    const threadId = getThreadId(ctx);
-    return threadId ? { message_thread_id: threadId } : {};
+  const threadId = getThreadId(ctx);
+  return threadId ? { message_thread_id: threadId } : {};
 }
 
 function paymentCaption(paymentData, finalOrderId, expiredAt) {
-    return `<b>━━━━〔 ⏳ EXPIRES IN • ${getCountdown(esc(paymentData.expiry_time))} 〕━━━━</b>
-<b>💰 Amount:</b> IDR ${rupiah(paymentData.amount)}
-<b>📍 Status:</b> <b>PENDING 🟡</b>
-<b>⏰ Expired Time:</b> <code>${esc(paymentData.expiry_time)}</code>`;
+  return `<b>━━━━〔 <tg-emoji emoji-id="5262540380301191210">⏳</tg-emoji> EXPIRES IN • ${getCountdown(esc(paymentData.expiry_time))} 〕━━━━</b>
+<b><tg-emoji emoji-id="5415636521086641694">💰</tg-emoji> Amount:</b> IDR ${rupiah(paymentData.amount)}
+<b><tg-emoji emoji-id="6203791465471022369">📍</tg-emoji> Status:</b> <b>PENDING <tg-emoji emoji-id="5852626860516577393">🟡</tg-emoji></b>
+<b><tg-emoji emoji-id="5348236797606379943">⏰</tg-emoji> Expired Time:</b> <code>${esc(paymentData.expiry_time)}</code>`;
 }
 
 function confirmKeyboard(amount) {
-    return Markup.inlineKeyboard([
-        [
-            {
-                text: "✅ Yes",
-                callback_data: `confirm_${amount}`,
-                style: "success"
-            },
-            {
-                text: "🔙 Back",
-                callback_data: "confirm_cancel",
-                style: "danger"
-            }
-        ]
-    ]);
+  return Markup.inlineKeyboard([
+    [
+      {
+        text: "Yes",
+        callback_data: `confirm_${amount}`,
+        style: "success",
+        icon_custom_emoji_id: "5850724091220201465",
+      },
+      {
+        text: "Cancel",
+        callback_data: "confirm_cancel",
+        style: "danger",
+        icon_custom_emoji_id: "5019523782004441717",
+      },
+    ],
+  ]);
 }
 
 function invoiceKeyboard(finalOrderId) {
-    return Markup.inlineKeyboard([
-        [
-            {
-                text: "🔄 Check Status",
-                callback_data: `check_${finalOrderId}`,
-                style: "primary"
-            }
-        ],
-        [
-            {
-                text: "🧾 View Invoice",
-                url: `${process.env.PAYMENT_URL}/invoice/${finalOrderId}`,
-                style: "primary"
-            },
-            {
-                text: "❌ Cancel",
-                callback_data: `cancels_${finalOrderId}`,
-                style: "danger"
-            }
-        ]
-    ]);
+  return Markup.inlineKeyboard([
+    [
+      {
+        text: "Check Status",
+        callback_data: `check_${finalOrderId}`,
+        style: "primary",
+        icon_custom_emoji_id: "5346269127059196142",
+      },
+    ],
+    [
+      {
+        text: "View Invoice",
+        url: `${process.env.PAYMENT_URL}/invoice/${finalOrderId}`,
+        style: "primary",
+        icon_custom_emoji_id: "5271604874419647061",
+      },
+      {
+        text: "Cancel",
+        callback_data: `cancels_${finalOrderId}`,
+        style: "danger",
+        icon_custom_emoji_id: "5019523782004441717",    
+      },
+    ],
+  ]);
 }
 
 async function showConfirmAmount(ctx, amount) {
-    const message = `<b>⚠️ Confirm Payment</b>
+  const message = `<b><tg-emoji emoji-id="5213181173026533794">⚠️</tg-emoji> Confirm Payment <tg-emoji emoji-id="5213181173026533794">⚠️</tg-emoji></b>
 ━━━━━━━━━━━━━━━━━━
-<b>💰 Amount:</b> IDR ${rupiah(amount)}
-<b>💳 Payment Method:</b> QRIS
+<b><tg-emoji emoji-id="5415636521086641694">💰</tg-emoji> Amount:</b> IDR ${rupiah(amount)}
+<b><tg-emoji emoji-id="5190915130556162925">💳</tg-emoji> Payment Method:</b> <tg-emoji emoji-id="6339136888674192137">💳</tg-emoji>QRIS
 ━━━━━━━━━━━━━━━━━━
-Do you want to continue and create invoice?`;
+<i>Do you want to continue and create invoice?</i>`;
 
-    const options = {
-        ...HTML,
-        ...confirmKeyboard(amount)
-    };
+  const options = {
+    ...HTML,
+    ...confirmKeyboard(amount),
+  };
 
-    try {
-        return await ctx.editMessageText(message, options);
-    } catch {
-        return await ctx.reply(message, {
-            ...options,
-            ...threadOptionsFromCtx(ctx)
-        });
-    }
+  try {
+    return await ctx.editMessageText(message, options);
+  } catch {
+    return await ctx.reply(message, {
+      ...options,
+      ...threadOptionsFromCtx(ctx),
+    });
+  }
 }
 
 function loadDB() {
-    if (!fs.existsSync(DB_FILE)) {
-        return { payments: [] };
+  if (!fs.existsSync(DB_FILE)) {
+    return { payments: [] };
+  }
+
+  try {
+    const raw = fs.readFileSync(DB_FILE, "utf8");
+
+    if (!raw) {
+      return { payments: [] };
     }
 
-    try {
-        const raw = fs.readFileSync(DB_FILE, "utf8");
+    const db = JSON.parse(raw);
 
-        if (!raw) {
-            return { payments: [] };
-        }
-
-        const db = JSON.parse(raw);
-
-        if (!Array.isArray(db.payments)) {
-            db.payments = [];
-        }
-
-        return db;
-    } catch (err) {
-        console.log("Failed to read database:", err.message);
-        return { payments: [] };
+    if (!Array.isArray(db.payments)) {
+      db.payments = [];
     }
+
+    return db;
+  } catch (err) {
+    console.log("Failed to read database:", err.message);
+    return { payments: [] };
+  }
 }
 
 function saveDB(db) {
-    fs.writeFileSync(
-        DB_FILE,
-        JSON.stringify(db, null, 2),
-        "utf8"
-    );
+  fs.writeFileSync(DB_FILE, JSON.stringify(db, null, 2), "utf8");
 }
 
 function getThreadId(ctx) {
-    return (
-        ctx.message?.message_thread_id ||
-        ctx.callbackQuery?.message?.message_thread_id ||
-        ctx.update?.callback_query?.message?.message_thread_id ||
-        null
-    );
+  return (
+    ctx.message?.message_thread_id ||
+    ctx.callbackQuery?.message?.message_thread_id ||
+    ctx.update?.callback_query?.message?.message_thread_id ||
+    null
+  );
 }
 
 function paymentSendOptions(payment) {
-    return payment.thread_id
-        ? { message_thread_id: payment.thread_id }
-        : {};
+  return payment.thread_id ? { message_thread_id: payment.thread_id } : {};
 }
 
 function stopCountdown(orderId) {
-    if (countdownTimers[orderId]) {
-        clearInterval(countdownTimers[orderId]);
-        delete countdownTimers[orderId];
-    }
+  if (countdownTimers[orderId]) {
+    clearInterval(countdownTimers[orderId]);
+    delete countdownTimers[orderId];
+  }
 }
 
 async function expirePayment(telegram, orderId) {
-    const db = loadDB();
-    const payment = db.payments.find(p => p.order_id === orderId);
+  const db = loadDB();
+  const payment = db.payments.find((p) => p.order_id === orderId);
 
-    if (!payment) return;
+  if (!payment) return;
 
-    if (PAID_STATUS.includes(payment.status) || FAILED_STATUS.includes(payment.status)) {
-        return;
-    }
+  if (
+    PAID_STATUS.includes(payment.status) ||
+    FAILED_STATUS.includes(payment.status)
+  ) {
+    return;
+  }
 
-    payment.status = "expire";
-    payment.updated_at = formatDate();
-    saveDB(db);
+  payment.status = "expire";
+  payment.updated_at = formatDate();
+  saveDB(db);
 
-    stopCountdown(orderId);
+  stopCountdown(orderId);
 
-    await finishPayment(telegram, payment, "expire");
+  await finishPayment(telegram, payment, "expire");
 }
 
-function startCountdown(telegram, paymentData, finalOrderId, sentMessage, expiredAt) {
-    stopCountdown(finalOrderId);
+function startCountdown(
+  telegram,
+  paymentData,
+  finalOrderId,
+  sentMessage,
+  expiredAt,
+) {
+  stopCountdown(finalOrderId);
 
-    countdownTimers[finalOrderId] = setInterval(async () => {
-        const db = loadDB();
-        const payment = db.payments.find(p => p.order_id === finalOrderId);
+  countdownTimers[finalOrderId] = setInterval(async () => {
+    const db = loadDB();
+    const payment = db.payments.find((p) => p.order_id === finalOrderId);
 
-        if (!payment) {
-            stopCountdown(finalOrderId);
-            return;
-        }
+    if (!payment) {
+      stopCountdown(finalOrderId);
+      return;
+    }
 
-        if (PAID_STATUS.includes(payment.status) || FAILED_STATUS.includes(payment.status)) {
-            stopCountdown(finalOrderId);
-            return;
-        }
-        const expiredAts = new Date(
-            paymentData.expiry_time.replace(" ", "T") + "+07:00"
-        ).getTime();
+    if (
+      PAID_STATUS.includes(payment.status) ||
+      FAILED_STATUS.includes(payment.status)
+    ) {
+      stopCountdown(finalOrderId);
+      return;
+    }
+    const expiredAts = new Date(
+      paymentData.expiry_time.replace(" ", "T") + "+07:00",
+    ).getTime();
 
-        if (Date.now() >= expiredAts) {
-            await expirePayment(telegram, finalOrderId);
-            return;
-        }
+    if (Date.now() >= expiredAts) {
+      await expirePayment(telegram, finalOrderId);
+      return;
+    }
 
-        const check_status = await api.post("/qris/status", {
-            transaction_id: payment.transaction_id
-        });
+    const check_status = await api.post("/qris/status", {
+      transaction_id: payment.transaction_id,
+    });
 
-        const api_check = check_status.data;
+    const api_check = check_status.data;
 
-        if (!api_check.success && api_check.message != 'Transaction pending') {
-            stopCountdown(finalOrderId);
-            return;
-        }
+    if (!api_check.success && api_check.message != "Transaction pending") {
+      stopCountdown(finalOrderId);
+      return;
+    }
 
-        if (PAID_STATUS.includes(api_check.data.transaction_status) || FAILED_STATUS.includes(api_check.data.transaction_status)) {
-            payment.status = api_check.data.transaction_status;
-            payment.updated_at = formatDate();
-            payment.check_response = api_check;
-            saveDB(db);
-            return await finishPayment(
-                telegram,
-                payment,
-                api_check.data.transaction_status
-            );
-        }
+    if (
+      PAID_STATUS.includes(api_check.data.transaction_status) ||
+      FAILED_STATUS.includes(api_check.data.transaction_status)
+    ) {
+      payment.status = api_check.data.transaction_status;
+      payment.updated_at = formatDate();
+      payment.check_response = api_check;
+      saveDB(db);
+      return await finishPayment(
+        telegram,
+        payment,
+        api_check.data.transaction_status,
+      );
+    }
 
-        try {
-            await telegram.editMessageCaption(
-                sentMessage.chat.id,
-                sentMessage.message_id,
-                null,
-                paymentCaption(paymentData, finalOrderId, expiredAt),
-                {
-                    parse_mode: "HTML",
-                    ...invoiceKeyboard(finalOrderId)
-                }
-            );
-        } catch (err) {
-            console.log("Failed to update countdown:", err.message);
-        }
-    }, 3153);
+    try {
+      await telegram.editMessageCaption(
+        sentMessage.chat.id,
+        sentMessage.message_id,
+        null,
+        paymentCaption(paymentData, finalOrderId, expiredAt),
+        {
+          parse_mode: "HTML",
+          ...invoiceKeyboard(finalOrderId),
+        },
+      );
+    } catch (err) {
+      console.log("Failed to update countdown:", err.message);
+    }
+  }, 3153);
 }
 
 const api = axios.create({
-    baseURL: `${process.env.PAYMENT_API_URL}`,
-    headers: {
-        Authorization: `Bearer ${process.env.PAYMENT_API_KEY}`,
-        "Content-Type": "application/json"
-    }
+  baseURL: `${process.env.PAYMENT_API_URL}`,
+  headers: {
+    Authorization: `Bearer ${process.env.PAYMENT_API_KEY}`,
+    "Content-Type": "application/json",
+  },
 });
 
-const amountKeyboard = Markup.inlineKeyboard([
-    [
-        Markup.button.callback("IDR 25.000", "amount_25000"),
-        Markup.button.callback("IDR 50.000", "amount_50000"),
-        Markup.button.callback("IDR 100.000", "amount_100000")
-    ],
-    [
-        Markup.button.callback("IDR 200.000", "amount_200000"),
-        Markup.button.callback("IDR 300.000", "amount_300000"),
-        Markup.button.callback("IDR 400.000", "amount_400000")
-    ],
-    [
-        Markup.button.callback("IDR 500.000", "amount_500000"),
-        Markup.button.callback("IDR 600.000", "amount_600000"),
-        Markup.button.callback("IDR 700.000", "amount_700000")
-    ],
-    [
-        Markup.button.callback("IDR 800.000", "amount_800000"),
-        Markup.button.callback("IDR 900.000", "amount_900000"),
-        Markup.button.callback("IDR 1.000.000", "amount_1000000")
-    ],
-    [
-        {
-            text: "📝 Custom Amount",
-            callback_data: "custom_amount",
-            style: "primary"
-        }
-    ]
-]);
+const amountKeyboard = [
+  [
+    {
+      text: "IDR 25.000",
+      callback_data: "amount_25000",
+      icon_custom_emoji_id: "5415636521086641694",
+    },
+    {
+      text: "IDR 50.000",
+      callback_data: "amount_50000",
+      icon_custom_emoji_id: "5415636521086641694",
+    },
+    {
+      text: "IDR 100.000",
+      callback_data: "amount_100000",
+      icon_custom_emoji_id: "5415636521086641694",
+    },
+  ],
+  [
+    {
+      text: "IDR 200.000",
+      callback_data: "amount_200000",
+      icon_custom_emoji_id: "5415636521086641694",
+    },
+    {
+      text: "IDR 300.000",
+      callback_data: "amount_300000",
+      icon_custom_emoji_id: "5415636521086641694",
+    },
+    {
+      text: "IDR 400.000",
+      callback_data: "amount_400000",
+      icon_custom_emoji_id: "5415636521086641694",
+    },
+  ],
+  [
+    {
+      text: "IDR 500.000",
+      callback_data: "amount_500000",
+      icon_custom_emoji_id: "5415636521086641694",
+    },
+    {
+      text: "IDR 600.000",
+      callback_data: "amount_600000",
+      icon_custom_emoji_id: "5415636521086641694",
+    },
+    {
+      text: "IDR 700.000",
+      callback_data: "amount_700000",
+      icon_custom_emoji_id: "5415636521086641694",
+    },
+  ],
+  [
+    {
+      text: "IDR 800.000",
+      callback_data: "amount_800000",
+      icon_custom_emoji_id: "5415636521086641694",
+    },
+    {
+      text: "IDR 900.000",
+      callback_data: "amount_900000",
+      icon_custom_emoji_id: "5415636521086641694",
+    },
+    {
+      text: "IDR 1.000.000",
+      callback_data: "amount_1000000",
+      icon_custom_emoji_id: "5415636521086641694",
+    },
+  ],
+  [
+    {
+      text: "Custom Amount",
+      callback_data: "custom_amount",
+      style: "primary",
+      icon_custom_emoji_id: "5197269100878907942",
+    },
+  ],
+];
 
-bot.start(ctx => {
-    ctx.reply(
-        `<b>👋 Hello!</b> Use /qris to generate a QRIS payment.`,
-        HTML
-    );
+bot.start((ctx) => {
+  ctx.reply(`<b>👋 Hello!</b> Use /qris to generate a QRIS payment.`, HTML);
 });
 
-bot.command("qris", ctx => {
-    ctx.reply(
-        `<b>💳 QRIS Payment</b>
-Please select amount below, or choose custom amount.`,
-        {
-            ...HTML,
-            ...amountKeyboard
-        }
-    );
+bot.command("qris", (ctx) => {
+  ctx.reply(
+    `<b><tg-emoji emoji-id="5440410042773824003">💳</tg-emoji> QRIS Payment <tg-emoji emoji-id="5440410042773824003">💳</tg-emoji></b>
+<i>Please select amount below, or choose custom amount.</i>`,
+    {
+      parse_mode: "HTML",
+      reply_markup: {
+        inline_keyboard: amountKeyboard,
+      },
+    },
+  );
 });
 
-bot.action(/^amount_(\d+)$/, async ctx => {
-    await ctx.answerCbQuery();
-    await showConfirmAmount(ctx, Number(ctx.match[1]));
+bot.action(/^amount_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  await showConfirmAmount(ctx, Number(ctx.match[1]));
 });
 
-bot.action("custom_amount", async ctx => {
-    await ctx.answerCbQuery();
+bot.action("custom_amount", async (ctx) => {
+  await ctx.answerCbQuery();
 
-    userState[ctx.from.id] = {
-        waitingAmount: true,
-        threadId: getThreadId(ctx),
-        botMsgId: ctx.callbackQuery.message.message_id
-    };
+  userState[ctx.from.id] = {
+    waitingAmount: true,
+    threadId: getThreadId(ctx),
+    botMsgId: ctx.callbackQuery.message.message_id,
+  };
 
-    await ctx.editMessageText(
-        `<b>📝 Custom Amount</b>
+  await ctx.editMessageText(
+    `<b>📝 Custom Amount</b>
 Please enter the deposit amount. Example: <code>10000</code>`,
-        {
-            ...HTML,
-            reply_markup: {
-                inline_keyboard: []
-            }
-        }
+    {
+      ...HTML,
+      reply_markup: {
+        inline_keyboard: [],
+      },
+    },
+  );
+});
+
+bot.action(/^confirm_(\d+)$/, async (ctx) => {
+  await ctx.answerCbQuery();
+  await createPayment(ctx, Number(ctx.match[1]));
+});
+
+bot.action("confirm_cancel", async (ctx) => {
+  await ctx.answerCbQuery();
+  delete userState[ctx.from.id];
+
+  try {
+    await ctx.editMessageText(
+      `<b><tg-emoji emoji-id="5440410042773824003">💳</tg-emoji> QRIS Payment <tg-emoji emoji-id="5440410042773824003">💳</tg-emoji></b>
+<i>Please select amount below, or choose custom amount.</i>`,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: amountKeyboard,
+        },
+      },
     );
-});
-
-bot.action(/^confirm_(\d+)$/, async ctx => {
-    await ctx.answerCbQuery();
-    await createPayment(ctx, Number(ctx.match[1]));
-});
-
-bot.action("confirm_cancel", async ctx => {
-    await ctx.answerCbQuery();
-    delete userState[ctx.from.id];
-
-    try {
-        await ctx.editMessageText(
-            `<b>💳 QRIS Payment</b>
-Please select amount below, or choose custom amount.`,
-            {
-                ...HTML,
-                ...amountKeyboard
-            }
-        );
-    } catch {
-        await ctx.reply(
-            `<b>💳 QRIS Payment</b>
-Please select amount below, or choose custom amount.`,
-            {
-                ...HTML,
-                ...amountKeyboard,
-                message_thread_id: getThreadId(ctx)
-            }
-        );
-    }
-});
-
-bot.action("cancel", async ctx => {
-    await ctx.answerCbQuery("cancelled");
-    delete userState[ctx.from.id];
-
+  } catch {
     await ctx.reply(
-        `<b>❌ Payment Cancelled</b>The payment has been cancelled.`,
-        HTML
+      `<b><tg-emoji emoji-id="5440410042773824003">💳</tg-emoji> QRIS Payment <tg-emoji emoji-id="5440410042773824003">💳</tg-emoji></b>
+<i>Please select amount below, or choose custom amount.</i>`,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: amountKeyboard,
+        },
+        message_thread_id: getThreadId(ctx),
+      },
     );
+  }
 });
 
-bot.action(/^cancels_(.+)$/, async ctx => {
-    const orderId = ctx.match[1];
-    const db = loadDB();
-    const payment = db.payments.find(p => p.order_id === orderId);
+bot.action("cancel", async (ctx) => {
+  await ctx.answerCbQuery("cancelled");
+  delete userState[ctx.from.id];
 
-    if (!payment) {
-        return await ctx.answerCbQuery("Payment not found.", {
-            show_alert: true
-        });
+  await ctx.reply(
+    `<b><tg-emoji emoji-id="5019523782004441717">❌</tg-emoji> Payment Cancelled</b>The payment has been cancelled.`,
+    HTML,
+  );
+});
+
+bot.action(/^cancels_(.+)$/, async (ctx) => {
+  const orderId = ctx.match[1];
+  const db = loadDB();
+  const payment = db.payments.find((p) => p.order_id === orderId);
+
+  if (!payment) {
+    return await ctx.answerCbQuery("Payment not found.", {
+      show_alert: true,
+    });
+  }
+
+  const response = await api.post("/qris/cancel", {
+    transaction_id: payment.transaction_id,
+  });
+
+  const res = response.data;
+
+  if (!res.success) {
+    return await ctx.answerCbQuery(res.message, {
+      show_alert: true,
+    });
+  }
+
+  payment.status = "cancel";
+  payment.updated_at = formatDate();
+  saveDB(db);
+  stopCountdown(orderId);
+
+  try {
+    await ctx.telegram.deleteMessage(payment.chat_id, payment.message_id);
+
+    await ctx.telegram.sendMessage(
+      payment.chat_id,
+      `<b><tg-emoji emoji-id="5019523782004441717">❌</tg-emoji> PAYMENT CANCELLED <tg-emoji emoji-id="5019523782004441717">❌</tg-emoji></b>
+━━━━━━━━━━━━━━━━━━
+<b><tg-emoji emoji-id="5415636521086641694">💰</tg-emoji> Amount:</b> IDR ${rupiah(payment.amount)}
+<b><tg-emoji emoji-id="5332679880599418983">🆔</tg-emoji> Transaction ID:</b> <code>${esc(payment.transaction_id)}</code>
+<b><tg-emoji emoji-id="6203791465471022369">📍</tg-emoji> Status:</b> <b>CANCELLED <tg-emoji emoji-id="5019523782004441717">🔴</tg-emoji></b>
+━━━━━━━━━━━━━━━━━━
+<i>Your payment has been cancelled.</i>`,
+      {
+        ...HTML,
+        ...paymentSendOptions(payment),
+      },
+    );
+  } catch (err) {
+    console.log(err.message);
+  }
+
+  await ctx.answerCbQuery(res.message, {
+    show_alert: true,
+  });
+});
+
+bot.command("bank", async (ctx) => {
+  const banks = loadBanks();
+  if (!banks.length) {
+    return ctx.reply("❌ No bank available.");
+  }
+
+  let text = `<b>BANK LIST</b>\n ━━━━━━━━━━━━━━━━━━`;
+  for (const bank of banks) {
+    if (bank.name == "USDT") {
+      text += `
+<b>Wallet:</b> ${esc(bank.name)} - ${esc(bank.holder)}
+<b>Address:</b> <code>${esc(bank.number)}</code>
+`;
+    } else {
+      text += `
+<b>Bank Name:</b> ${esc(bank.name)}
+<b>Account Name:</b> ${esc(bank.holder)}
+<b>Account Number:</b> <code>${esc(bank.number)}</code>
+`;
+    }
+  }
+
+  text += `━━━━━━━━━━━━━━━━━━`;
+
+  await ctx.reply(text, {
+    ...HTML,
+    ...threadOptionsFromCtx(ctx),
+  });
+});
+
+bot.command("addbank", async (ctx) => {
+  if (!isOwner(ctx)) {
+    return ctx.reply("❌ Owner only.");
+  }
+
+  const input = ctx.message.text.split(" ").slice(1).join(" ");
+
+  if (!input.includes("|")) {
+    return ctx.reply("Format:\n/addbank BCA|123456789|Name");
+  }
+
+  const [name, number, holder] = input.split("|");
+
+  if (!name || !number || !holder) {
+    return ctx.reply("Format:\n/addbank BCA|123456789|Name");
+  }
+
+  const banks = loadBanks();
+
+  banks.push({
+    name: name.trim(),
+    number: number.trim(),
+    holder: holder.trim(),
+  });
+
+  saveBanks(banks);
+
+  await ctx.reply("✅ Bank added.");
+});
+
+bot.command("delbank", async (ctx) => {
+  if (!isOwner(ctx)) {
+    return ctx.reply("❌ Owner only.");
+  }
+
+  const bankName = ctx.message.text
+    .split(" ")
+    .slice(1)
+    .join(" ")
+    .trim()
+    .toUpperCase();
+
+  if (!bankName) {
+    return ctx.reply("Format:\n/delbank BCA");
+  }
+
+  const banks = loadBanks();
+
+  const filtered = banks.filter((b) => b.name.toUpperCase() !== bankName);
+
+  saveBanks(filtered);
+
+  await ctx.reply("✅ Bank deleted.");
+});
+
+bot.on("text", async (ctx) => {
+  const state = userState[ctx.from.id];
+  if (!state?.waitingAmount) return;
+
+  const currentThreadId = getThreadId(ctx);
+
+  if (state.threadId !== currentThreadId) return;
+
+  await ctx.deleteMessage().catch(() => {});
+
+  if (state.botMsgId) {
+    await ctx.telegram
+      .deleteMessage(ctx.chat.id, state.botMsgId)
+      .catch(() => {});
+  }
+
+  const amount = Number(ctx.message.text.replace(/[^\d]/g, ""));
+
+  if (!amount || amount < 1000) {
+    const msg = await ctx.reply(
+      `⚠️ Invalid Amount\nMinimum deposit is IDR 1,000`,
+    );
+
+    setTimeout(async () => {
+      await ctx.telegram
+        .deleteMessage(ctx.chat.id, msg.message_id)
+        .catch(() => {});
+    }, 5000);
+
+    return msg;
+  }
+
+  if (amount > 10000000) {
+    const msg = await ctx.reply(
+      `⚠️ Invalid Amount\nMaximum deposit is IDR 10,000,000`,
+    );
+
+    setTimeout(async () => {
+      await ctx.telegram
+        .deleteMessage(ctx.chat.id, msg.message_id)
+        .catch(() => {});
+    }, 5000);
+
+    return msg;
+  }
+
+  delete userState[ctx.from.id];
+
+  await showConfirmAmount(ctx, amount);
+});
+
+async function showLoading(ctx) {
+  try {
+    return await ctx.editMessageText(
+      `<b><tg-emoji emoji-id="5213452215527677338">⏳</tg-emoji> Creating Transaction</b> Please wait a moment...`,
+      {
+        ...HTML,
+        reply_markup: {
+          inline_keyboard: [],
+        },
+      },
+    );
+  } catch {
+    return await ctx.reply(
+      `<b><tg-emoji emoji-id="5213452215527677338">⏳</tg-emoji> Creating Transaction</b> Please wait a moment...`,
+      HTML,
+    );
+  }
+}
+
+async function createPayment(ctx, amount) {
+  const loadingMessage = await showLoading(ctx);
+
+  try {
+    let finalAmount = Number(amount);
+    if (finalAmount >= 500000) {
+      finalAmount += Math.ceil(finalAmount * 0.005);
     }
 
-    const response = await api.post("/qris/cancel", {
-        transaction_id: payment.transaction_id
+    const response = await api.post("/qris/generate", {
+      amount: finalAmount,
     });
 
     const res = response.data;
 
     if (!res.success) {
-        return await ctx.answerCbQuery(res.message, {
-            show_alert: true
-        });
+      await ctx.telegram.editMessageText(
+        loadingMessage.chat.id,
+        loadingMessage.message_id,
+        null,
+        `<b><tg-emoji emoji-id="5019523782004441717">❌</tg-emoji> Failed</b> Failed to create payment.`,
+        HTML,
+      );
+      return;
     }
 
-    payment.status = "cancel";
-    payment.updated_at = formatDate();
+    const paymentData = res.data;
+    const finalOrderId = paymentData.order_id;
+    const expiredAt = Date.now() + EXPIRE_MINUTES * 60 * 1000;
+    const qrBuffer = await QRCode.toBuffer(paymentData.qr_string);
+
+    await ctx.telegram.deleteMessage(
+      loadingMessage.chat.id,
+      loadingMessage.message_id,
+    );
+
+    const sentMessage = await ctx.replyWithPhoto(
+      { source: qrBuffer },
+      {
+        parse_mode: "HTML",
+        caption: paymentCaption(paymentData, finalOrderId, expiredAt),
+        ...invoiceKeyboard(finalOrderId),
+      },
+    );
+
+    const db = loadDB();
+
+    db.payments.push({
+      transaction_id: paymentData.transaction_id,
+      order_id: paymentData.order_id,
+      telegram_id: ctx.from.id,
+      chat_id: sentMessage.chat.id,
+      message_id: sentMessage.message_id,
+      thread_id: getThreadId(ctx),
+      username: ctx.from.username || null,
+      amount: paymentData.amount,
+      original_amount: amount,
+      fee_amount: finalAmount - amount,
+      status: paymentData.transaction_status,
+      qr_string: paymentData.qr_string,
+      qr_url: paymentData.qr_url,
+      transaction_time: paymentData.transaction_time,
+      expiry_time: paymentData.expiry_time,
+      expired_at: expiredAt,
+      created_at: formatDate(),
+    });
+
     saveDB(db);
-    stopCountdown(orderId);
 
-    try {
-        await ctx.telegram.deleteMessage(
-            payment.chat_id,
-            payment.message_id
-        );
-
-        await ctx.telegram.sendMessage(
-            payment.chat_id,
-            `<b>❌ PAYMENT CANCELLED</b>
-━━━━━━━━━━━━━━━━━━
-<b>💰 Amount:</b> IDR ${rupiah(payment.amount)}
-<b>🆔 Transaction ID:</b> <code>${esc(payment.transaction_id)}</code>
-<b>📍 Status:</b> <b>CANCELLED 🔴</b>
-━━━━━━━━━━━━━━━━━━
-Your payment has been cancelled.`,
-            {
-                ...HTML,
-                ...paymentSendOptions(payment)
-            }
-        );
-    } catch (err) {
-        console.log(err.message);
-    }
-
-    await ctx.answerCbQuery(res.message, {
-        show_alert: true
-    });
-});
-
-bot.command("bank", async ctx => {
-    const banks = loadBanks();
-    if (!banks.length) {
-        return ctx.reply(
-            "❌ No bank available."
-        );
-    }
-
-    let text = `<b>BANK LIST</b>\n ━━━━━━━━━━━━━━━━━━`;
-    for (const bank of banks) {
-        if (bank.name == 'USDT') {
-            text += `
-<b>Wallet:</b> ${esc(bank.name)} - ${esc(bank.holder)}
-<b>Address:</b> <code>${esc(bank.number)}</code>
-`;
-        } else {
-            text += `
-<b>Bank Name:</b> ${esc(bank.name)}
-<b>Account Name:</b> ${esc(bank.holder)}
-<b>Account Number:</b> <code>${esc(bank.number)}</code>
-`;
-        }
-    }
-
-    text += `━━━━━━━━━━━━━━━━━━`
-
-    await ctx.reply(text, {
-        ...HTML,
-        ...threadOptionsFromCtx(ctx)
-    });
-});
-
-bot.command("addbank", async ctx => {
-
-    if (!isOwner(ctx)) {
-        return ctx.reply("❌ Owner only.");
-    }
-
-    const input = ctx.message.text.split(" ").slice(1).join(" ");
-
-    if (!input.includes("|")) {
-        return ctx.reply(
-            "Format:\n/addbank BCA|123456789|Name"
-        );
-    }
-
-    const [name, number, holder] = input.split("|");
-
-    if (!name || !number || !holder) {
-        return ctx.reply(
-            "Format:\n/addbank BCA|123456789|Name"
-        );
-    }
-
-    const banks = loadBanks();
-
-    banks.push({
-        name: name.trim(),
-        number: number.trim(),
-        holder: holder.trim()
-    });
-
-    saveBanks(banks);
-
-    await ctx.reply("✅ Bank added.");
-});
-
-bot.command("delbank", async ctx => {
-
-    if (!isOwner(ctx)) {
-        return ctx.reply("❌ Owner only.");
-    }
-
-    const bankName = ctx.message.text
-        .split(" ")
-        .slice(1)
-        .join(" ")
-        .trim()
-        .toUpperCase();
-
-    if (!bankName) {
-        return ctx.reply(
-            "Format:\n/delbank BCA"
-        );
-    }
-
-    const banks = loadBanks();
-
-    const filtered = banks.filter(
-        b => b.name.toUpperCase() !== bankName
+    startCountdown(
+      ctx.telegram,
+      paymentData,
+      finalOrderId,
+      sentMessage,
+      expiredAt,
     );
 
-    saveBanks(filtered);
+    return sentMessage;
+  } catch (err) {
+    console.log(err.response?.data || err.message);
 
-    await ctx.reply("✅ Bank deleted.");
-});
-
-bot.on("text", async ctx => {
-    const state = userState[ctx.from.id];
-    if (!state?.waitingAmount) return;
-
-    const currentThreadId = getThreadId(ctx);
-
-    if (state.threadId !== currentThreadId) return;
-
-    await ctx.deleteMessage().catch(() => { });
-
-    if (state.botMsgId) {
-        await ctx.telegram.deleteMessage(
-            ctx.chat.id,
-            state.botMsgId
-        ).catch(() => { });
-    }
-
-    const amount = Number(
-        ctx.message.text.replace(/[^\d]/g, "")
+    await ctx.telegram.editMessageText(
+      loadingMessage.chat.id,
+      loadingMessage.message_id,
+      null,
+      `<b><tg-emoji emoji-id="5019523782004441717">❌</tg-emoji> Connection Error</b> Failed to connect to payment API.`,
+      HTML,
     );
-
-    if (!amount || amount < 1000) {
-        const msg = await ctx.reply(
-            `⚠️ Invalid Amount\nMinimum deposit is IDR 1,000`
-        );
-
-        setTimeout(async () => {
-            await ctx.telegram.deleteMessage(
-                ctx.chat.id,
-                msg.message_id
-            ).catch(() => { });
-        }, 5000);
-
-        return msg;
-    }
-
-    if (amount > 10000000) {
-        const msg = await ctx.reply(
-            `⚠️ Invalid Amount\nMaximum deposit is IDR 10,000,000`
-        );
-
-        setTimeout(async () => {
-            await ctx.telegram.deleteMessage(
-                ctx.chat.id,
-                msg.message_id
-            ).catch(() => { });
-        }, 5000);
-
-        return msg;
-    }
-
-    delete userState[ctx.from.id];
-
-    await showConfirmAmount(ctx, amount);
-});
-
-async function showLoading(ctx) {
-    try {
-        return await ctx.editMessageText(
-            `<b>⏳ Creating Transaction</b> Please wait a moment...`,
-            {
-                ...HTML,
-                reply_markup: {
-                    inline_keyboard: []
-                }
-            }
-        );
-    } catch {
-        return await ctx.reply(
-            `<b>⏳ Creating Transaction</b> Please wait a moment...`,
-            HTML
-        );
-    }
-}
-
-async function createPayment(ctx, amount) {
-    const loadingMessage = await showLoading(ctx);
-
-    try {
-        let finalAmount = Number(amount);
-        if (finalAmount >= 500000) {
-            finalAmount += Math.ceil(finalAmount * 0.005);
-        }
-
-        const response = await api.post("/qris/generate", {
-            amount: finalAmount
-        });
-
-        const res = response.data;
-
-        if (!res.success) {
-            await ctx.telegram.editMessageText(
-                loadingMessage.chat.id,
-                loadingMessage.message_id,
-                null,
-                `<b>❌ Failed</b> Failed to create payment.`,
-                HTML
-            );
-            return;
-        }
-
-        const paymentData = res.data;
-        const finalOrderId = paymentData.order_id;
-        const expiredAt = Date.now() + EXPIRE_MINUTES * 60 * 1000;
-        const qrBuffer = await QRCode.toBuffer(paymentData.qr_string);
-
-        await ctx.telegram.deleteMessage(
-            loadingMessage.chat.id,
-            loadingMessage.message_id
-        );
-
-        const sentMessage = await ctx.replyWithPhoto(
-            { source: qrBuffer },
-            {
-                parse_mode: "HTML",
-                caption: paymentCaption(paymentData, finalOrderId, expiredAt),
-                ...invoiceKeyboard(finalOrderId)
-            }
-        );
-
-        const db = loadDB();
-
-        db.payments.push({
-            transaction_id: paymentData.transaction_id,
-            order_id: paymentData.order_id,
-            telegram_id: ctx.from.id,
-            chat_id: sentMessage.chat.id,
-            message_id: sentMessage.message_id,
-            thread_id: getThreadId(ctx),
-            username: ctx.from.username || null,
-            amount: paymentData.amount,
-            original_amount: amount,
-            fee_amount: finalAmount - amount,
-            status: paymentData.transaction_status,
-            qr_string: paymentData.qr_string,
-            qr_url: paymentData.qr_url,
-            transaction_time: paymentData.transaction_time,
-            expiry_time: paymentData.expiry_time,
-            expired_at: expiredAt,
-            created_at: formatDate()
-        });
-
-        saveDB(db);
-
-        startCountdown(
-            ctx.telegram,
-            paymentData,
-            finalOrderId,
-            sentMessage,
-            expiredAt
-        );
-
-        return sentMessage;
-
-    } catch (err) {
-
-        console.log(err.response?.data || err.message);
-
-        await ctx.telegram.editMessageText(
-            loadingMessage.chat.id,
-            loadingMessage.message_id,
-            null,
-            `<b>❌ Connection Error</b> Failed to connect to payment API.`,
-            HTML
-        );
-    }
+  }
 }
 
 const PAID_STATUS = ["paid", "success", "settlement"];
 const FAILED_STATUS = ["expire", "cancel", "failed"];
 
 async function deleteInvoiceMessage(telegram, payment) {
-    try {
-        await telegram.deleteMessage(
-            payment.chat_id,
-            payment.message_id
-        );
-    } catch (err) {
-        console.log("Failed to delete invoice:", err.message);
-    }
+  try {
+    await telegram.deleteMessage(payment.chat_id, payment.message_id);
+  } catch (err) {
+    console.log("Failed to delete invoice:", err.message);
+  }
 }
 
 async function sendPaymentSuccessMessage(telegram, payment) {
-    await telegram.sendMessage(
-        payment.chat_id,
-        `<b>╭━━━〔 ✅ PAYMENT SUCCESS 〕━━━╮</b>
+  await telegram.sendMessage(
+    payment.chat_id,
+    `<b>╭━━━〔 <tg-emoji emoji-id="5456432998092133477">✅</tg-emoji> PAYMENT SUCCESS 〕━━━╮</b>
 
-<b>💰 Amount:</b> IDR ${rupiah(payment.amount)}
-<b>🧾 Transaction ID:</b> <code>${esc(cleanOrderId(payment.order_id))}</code>
-<b>📍 Status:</b> <b>PAID 🟢</b>
-<b>⏰ Paid Time:</b> <code>${formatDate()}</code>
+<b><tg-emoji emoji-id="5415636521086641694">💰</tg-emoji> Amount:</b> IDR ${rupiah(payment.amount)}
+<b><tg-emoji emoji-id="5332679880599418983">🆔</tg-emoji> Transaction ID:</b> <code>${esc(cleanOrderId(payment.order_id))}</code>
+<b><tg-emoji emoji-id="6203791465471022369">📍</tg-emoji> Status:</b> <b>PAID <tg-emoji emoji-id="5456432998092133477">✅</tg-emoji></b>
+<b><tg-emoji emoji-id="5406584984884489418">⏰</tg-emoji> Paid Time:</b> <code>${formatDate()}</code>
 ━━━━━━━━━━━━━━━━━━
-Thank you. Your payment has been received successfully.`,
-        {
-            ...HTML,
-            ...paymentSendOptions(payment)
-        }
-    );
+<i>Thank you. Your payment has been received successfully.</i>`,
+    {
+      ...HTML,
+      ...paymentSendOptions(payment),
+    },
+  );
 }
 
 async function sendPaymentFailedMessage(telegram, payment, status) {
-    await telegram.sendMessage(
-        payment.chat_id,
-        `<b>❌ PAYMENT ${esc(String(status).toUpperCase())}</b>
+  await telegram.sendMessage(
+    payment.chat_id,
+    `<b><tg-emoji emoji-id="5017122105011995219">❌</tg-emoji> PAYMENT ${esc(String(status).toUpperCase())}</b>
 ━━━━━━━━━━━━━━━━━━
-<b>💰 Amount:</b> IDR ${rupiah(payment.amount)}
-<b>🧾 Transaction ID:</b> <code>${esc(cleanOrderId(payment.order_id))}</code>
-<b>📍 Status:</b> <b>${esc(String(status).toUpperCase())} 🔴</b>
+<b><tg-emoji emoji-id="5415636521086641694">💰</tg-emoji> Amount:</b> IDR ${rupiah(payment.amount)}
+<b><tg-emoji emoji-id="5332679880599418983">🆔</tg-emoji> Transaction ID:</b> <code>${esc(cleanOrderId(payment.order_id))}</code>
+<b><tg-emoji emoji-id="6203791465471022369">📍</tg-emoji> Status:</b> <b>${esc(String(status).toUpperCase())} 🔴</b>
 ━━━━━━━━━━━━━━━━━━
-This payment is no longer valid.`,
-        {
-            ...HTML,
-            ...paymentSendOptions(payment)
-        }
-    );
+<i>This payment is no longer valid.</i>`,
+    {
+      ...HTML,
+      ...paymentSendOptions(payment),
+    },
+  );
 }
 
 async function finishPayment(telegram, payment, status) {
-    stopCountdown(payment.order_id);
+  stopCountdown(payment.order_id);
 
-    await deleteInvoiceMessage(telegram, payment);
+  await deleteInvoiceMessage(telegram, payment);
 
-    if (PAID_STATUS.includes(status)) {
-        return await sendPaymentSuccessMessage(telegram, payment);
-    }
+  if (PAID_STATUS.includes(status)) {
+    return await sendPaymentSuccessMessage(telegram, payment);
+  }
 
-    if (FAILED_STATUS.includes(status)) {
-        return await sendPaymentFailedMessage(telegram, payment, status);
-    }
+  if (FAILED_STATUS.includes(status)) {
+    return await sendPaymentFailedMessage(telegram, payment, status);
+  }
 }
 
-bot.action(/^check_(.+)$/, async ctx => {
-    const orderId = ctx.match[1];
+bot.action(/^check_(.+)$/, async (ctx) => {
+  const orderId = ctx.match[1];
 
-    try {
-        const db = loadDB();
-        const payment = db.payments.find(p => p.order_id === orderId);
+  try {
+    const db = loadDB();
+    const payment = db.payments.find((p) => p.order_id === orderId);
 
-        if (!payment) {
-            return await ctx.answerCbQuery("Payment not found.", {
-                show_alert: true
-            });
-        }
-
-        if (payment.expired_at && Date.now() >= payment.expired_at) {
-            payment.status = "expire";
-            payment.updated_at = formatDate();
-            saveDB(db);
-
-            await ctx.answerCbQuery("Payment expired.", {
-                show_alert: true
-            });
-
-            return await finishPayment(ctx.telegram, payment, "expire");
-        }
-
-        const check_status = await api.post("/qris/status", {
-            transaction_id: payment.transaction_id
-        });
-
-        const api_check = check_status.data;
-
-        if (!api_check.success) {
-            return await ctx.answerCbQuery(api_check.message, {
-                show_alert: true
-            });
-        }
-
-        payment.status = api_check.data.transaction_status;
-        payment.updated_at = formatDate();
-        payment.check_response = api_check;
-        saveDB(db);
-
-        if (PAID_STATUS.includes(api_check.data.transaction_status) ||
-            FAILED_STATUS.includes(api_check.data.transaction_status)
-        ) {
-            return await finishPayment(
-                ctx.telegram,
-                payment,
-                api_check.data.transaction_status
-            );
-        }
-
-        return await ctx.answerCbQuery(
-            `Payment status: ${api_check.data.message}`,
-            {
-                show_alert: true
-            }
-        );
-    } catch (err) {
-        console.error(err.response?.data || err.message);
-
-        return await ctx.answerCbQuery(
-            "Failed to check payment status.",
-            {
-                show_alert: true
-            }
-        );
+    if (!payment) {
+      return await ctx.answerCbQuery("Payment not found.", {
+        show_alert: true,
+      });
     }
+
+    if (payment.expired_at && Date.now() >= payment.expired_at) {
+      payment.status = "expire";
+      payment.updated_at = formatDate();
+      saveDB(db);
+
+      await ctx.answerCbQuery("Payment expired.", {
+        show_alert: true,
+      });
+
+      return await finishPayment(ctx.telegram, payment, "expire");
+    }
+
+    const check_status = await api.post("/qris/status", {
+      transaction_id: payment.transaction_id,
+    });
+
+    const api_check = check_status.data;
+
+    if (!api_check.success) {
+      return await ctx.answerCbQuery(api_check.message, {
+        show_alert: true,
+      });
+    }
+
+    payment.status = api_check.data.transaction_status;
+    payment.updated_at = formatDate();
+    payment.check_response = api_check;
+    saveDB(db);
+
+    if (
+      PAID_STATUS.includes(api_check.data.transaction_status) ||
+      FAILED_STATUS.includes(api_check.data.transaction_status)
+    ) {
+      return await finishPayment(
+        ctx.telegram,
+        payment,
+        api_check.data.transaction_status,
+      );
+    }
+
+    return await ctx.answerCbQuery(
+      `Payment status: ${api_check.data.message}`,
+      {
+        show_alert: true,
+      },
+    );
+  } catch (err) {
+    console.error(err.response?.data || err.message);
+
+    return await ctx.answerCbQuery("Failed to check payment status.", {
+      show_alert: true,
+    });
+  }
 });
 
 app.post("/webhook/gopay", async (req, res) => {
-    console.log(
-        "Webhook callback:",
-        JSON.stringify(req.body, null, 2)
+  console.log("Webhook callback:", JSON.stringify(req.body, null, 2));
+
+  try {
+    const { event, transaction } = req.body;
+
+    if (event === "verification.challenge") {
+      return res.json({
+        success: true,
+      });
+    }
+
+    if (!transaction) {
+      return res.json({
+        success: true,
+      });
+    }
+
+    const orderId = transaction.order_id;
+    const status = transaction.status;
+
+    const db = loadDB();
+
+    const payment = db.payments.find(
+      (p) => p.order_id === orderId || p.transaction_id === transaction.id,
     );
 
-    try {
-        const { event, transaction } = req.body;
-
-        if (event === "verification.challenge") {
-            return res.json({
-                success: true
-            });
-        }
-
-        if (!transaction) {
-            return res.json({
-                success: true
-            });
-        }
-
-        const orderId = transaction.order_id;
-        const status = transaction.status;
-
-        const db = loadDB();
-
-        const payment = db.payments.find(
-            p =>
-                p.order_id === orderId ||
-                p.transaction_id === transaction.id
-        );
-
-        if (!payment) {
-            return res.json({
-                success: true
-            });
-        }
-
-        payment.status = status;
-        payment.updated_at = formatDate();
-
-        saveDB(db);
-
-        if (
-            PAID_STATUS.includes(status) ||
-            FAILED_STATUS.includes(status)
-        ) {
-            try {
-                await finishPayment(
-                    bot.telegram,
-                    payment,
-                    status
-                );
-            } catch (finishErr) {
-                console.log(
-                    "Finish payment error:",
-                    finishErr.message
-                );
-            }
-        }
-
-        return res.json({
-            success: true
-        });
-
-    } catch (err) {
-        console.log("Webhook error:", err.message);
-
-        return res.status(500).json({
-            success: false,
-            error: "Internal server error"
-        });
+    if (!payment) {
+      return res.json({
+        success: true,
+      });
     }
+
+    payment.status = status;
+    payment.updated_at = formatDate();
+
+    saveDB(db);
+
+    if (PAID_STATUS.includes(status) || FAILED_STATUS.includes(status)) {
+      try {
+        await finishPayment(bot.telegram, payment, status);
+      } catch (finishErr) {
+        console.log("Finish payment error:", finishErr.message);
+      }
+    }
+
+    return res.json({
+      success: true,
+    });
+  } catch (err) {
+    console.log("Webhook error:", err.message);
+
+    return res.status(500).json({
+      success: false,
+      error: "Internal server error",
+    });
+  }
 });
 
 bot.launch();
 
 function cleanupOldPayments() {
+  const db = loadDB();
 
-    const db = loadDB();
+  const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
 
-    const TWO_DAYS = 2 * 24 * 60 * 60 * 1000;
+  const now = Date.now();
 
-    const now = Date.now();
+  db.payments = db.payments.filter((payment) => {
+    const createdAt = new Date(payment.created_at).getTime();
 
-    db.payments = db.payments.filter(payment => {
+    if (isNaN(createdAt)) {
+      return false;
+    }
 
-        const createdAt = new Date(
-            payment.created_at
-        ).getTime();
+    return now - createdAt < TWO_DAYS;
+  });
 
-        if (isNaN(createdAt)) {
-            return false;
-        }
+  saveDB(db);
 
-        return (now - createdAt) < TWO_DAYS;
-    });
-
-    saveDB(db);
-
-    console.log(
-        `[CLEANUP] Old payments cleaned at ${formatDate()}`
-    );
+  console.log(`[CLEANUP] Old payments cleaned at ${formatDate()}`);
 }
 
 app.get("/invoice/:orderId", (req, res) => {
-    const { orderId } = req.params;
+  const { orderId } = req.params;
 
-    const db = loadDB();
-    const payment = db.payments.find(
-        p => p.transaction_id === orderId || p.order_id === orderId
-    );
+  const db = loadDB();
+  const payment = db.payments.find(
+    (p) => p.transaction_id === orderId || p.order_id === orderId,
+  );
 
-    if (!payment) {
-        return res.status(404).send("Payment not found");
-    }
+  if (!payment) {
+    return res.status(404).send("Payment not found");
+  }
 
-    res.send(`
+  res.send(`
 <!DOCTYPE html>
 <html lang="en">
 
@@ -1076,9 +1091,9 @@ app.get("/invoice/:orderId", (req, res) => {
     const orderId = ${JSON.stringify(payment.order_id)};
     const cleareOrder = '${cleanOrderId(payment.order_id)}';
     const expiredAt = ${JSON.stringify(
-        new Date(payment.expiry_time).toLocaleString("sv-SE", {
-            timeZone: "Asia/Jakarta",
-        }),
+      new Date(payment.expiry_time).toLocaleString("sv-SE", {
+        timeZone: "Asia/Jakarta",
+      }),
     )};
     const amount = ${JSON.stringify(Number(payment.amount))};
     const transactionId = ${JSON.stringify(payment.transaction_id)};
@@ -1330,105 +1345,107 @@ app.get("/invoice/:orderId", (req, res) => {
 });
 
 app.get("/api/payment/status/:orderId", async (req, res) => {
-    const { orderId } = req.params;
+  const { orderId } = req.params;
 
-    const db = loadDB();
-    const payment = db.payments.find(p => p.transaction_id === orderId);
+  const db = loadDB();
+  const payment = db.payments.find((p) => p.transaction_id === orderId);
 
-    if (!payment) {
-        return res.json({
-            success: false,
-            message: "Payment not found"
-        });
-    }
-
-    if (payment.status != 'pending') {
-        return res.json({
-            success: true,
-            data: {
-                order_id: payment.order_id,
-                transaction_id: payment.transaction_id,
-                status: payment.status
-            }
-        });
-    }
-
-
-    const expiredAts = new Date(
-        payment.expiry_time.replace(" ", "T") + "+07:00"
-    ).getTime();
-
-    if (payment.expiry_time && Date.now() >= expiredAts) {
-        payment.status = "expire";
-        payment.updated_at = formatDate();
-        saveDB(db);
-
-        return res.json({
-            success: true,
-            data: {
-                order_id: payment.order_id,
-                transaction_id: payment.transaction_id,
-                status: payment.status
-            }
-        });
-    }
-
-    const check_status = await api.post("/qris/status", {
-        transaction_id: payment.transaction_id
+  if (!payment) {
+    return res.json({
+      success: false,
+      message: "Payment not found",
     });
+  }
 
-    const api_check = check_status.data;
+  if (payment.status != "pending") {
+    return res.json({
+      success: true,
+      data: {
+        order_id: payment.order_id,
+        transaction_id: payment.transaction_id,
+        status: payment.status,
+      },
+    });
+  }
 
-    if (!api_check.success) {
-        return res.json({
-            success: true,
-            data: {
-                order_id: payment.order_id,
-                transaction_id: payment.transaction_id,
-                status: payment.status
-            }
-        });
-    }
+  const expiredAts = new Date(
+    payment.expiry_time.replace(" ", "T") + "+07:00",
+  ).getTime();
 
-    payment.status = api_check.data.transaction_status;
+  if (payment.expiry_time && Date.now() >= expiredAts) {
+    payment.status = "expire";
     payment.updated_at = formatDate();
-    payment.check_response = api_check;
     saveDB(db);
 
     return res.json({
-        success: true,
-        data: {
-            order_id: payment.order_id,
-            transaction_id: payment.transaction_id,
-            status: api_check.data.transaction_status
-        }
+      success: true,
+      data: {
+        order_id: payment.order_id,
+        transaction_id: payment.transaction_id,
+        status: payment.status,
+      },
     });
+  }
+
+  const check_status = await api.post("/qris/status", {
+    transaction_id: payment.transaction_id,
+  });
+
+  const api_check = check_status.data;
+
+  if (!api_check.success) {
+    return res.json({
+      success: true,
+      data: {
+        order_id: payment.order_id,
+        transaction_id: payment.transaction_id,
+        status: payment.status,
+      },
+    });
+  }
+
+  payment.status = api_check.data.transaction_status;
+  payment.updated_at = formatDate();
+  payment.check_response = api_check;
+  saveDB(db);
+
+  return res.json({
+    success: true,
+    data: {
+      order_id: payment.order_id,
+      transaction_id: payment.transaction_id,
+      status: api_check.data.transaction_status,
+    },
+  });
 });
 
 // 404 handler
 app.use((req, res) => {
-    res.status(404).send(`
+  res.status(404).send(`
     <h1>Page Not Found</h1>
-  `)
-})
+  `);
+});
 
 // Global error handler
 app.use((err, req, res, next) => {
-    console.error(err)
+  console.error(err);
 
-    res.status(err.status || 500).send(`
+  res.status(err.status || 500).send(`
     <h1>Internal Server Error</h1>
-  `)
-})
+  `);
+});
 
-setInterval(() => {
+setInterval(
+  () => {
     cleanupOldPayments();
-}, 60 * 60 * 1000);
+  },
+  60 * 60 * 1000,
+);
 
 cleanupOldPayments();
 
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on port ${PORT}`);
+  console.log(`Server running on port ${PORT}`);
 });
