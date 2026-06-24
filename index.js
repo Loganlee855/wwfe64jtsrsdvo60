@@ -6,13 +6,10 @@ const fs = require("fs");
 const axios = require("axios");
 const QRCode = require("qrcode");
 const crypto = require("crypto");
-
 process.env.TZ = process.env.TZ || "Asia/Jakarta";
-
 const bot = new Telegraf(process.env.BOT_TOKEN);
 const app = express();
 app.use(express.json());
-
 const DB_FILE = "./db.json";
 const userState = {};
 const countdownTimers = {};
